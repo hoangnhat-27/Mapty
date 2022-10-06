@@ -66,17 +66,27 @@ const inputDistance = document.querySelector('.form__input--distance');
 const inputDuration = document.querySelector('.form__input--duration');
 const inputCadence = document.querySelector('.form__input--cadence');
 const inputElevation = document.querySelector('.form__input--elevation');
-
+const btnClear = document.querySelector('.clear__btn');
 class App {
     #map;
     #mapEvent;
     #mapZoomLevel = 14;
     #workouts = [];
     constructor() {
+        //Get user's position
         this._getPosition();
+        //Get data from local storage
+        this._getLocalStorage();
+        //Attach event handlers
         form.addEventListener('submit', this._newWorkout.bind(this));
         inputType.addEventListener('change', this._toggleElevationField);
-        containerWorkouts.addEventListener('click', this._moveToPopup.bind(this));
+        const thisK = this;
+        containerWorkouts.addEventListener('click', function (e) {
+            if (e.target.className.includes('workout__close')) {
+            } else {
+                thisK._moveToPopup(e);
+            }
+        });
     }
     _getPosition() {
         if (navigator.geolocation) {
@@ -91,6 +101,7 @@ class App {
         const coords = [latitude, longitude];
         this.#map = L.map('map').setView(coords, this.#mapZoomLevel);
         const map = this.#map;
+        const thisK = this;
         L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
@@ -100,6 +111,26 @@ class App {
             .addTo(this.#map)
             .bindPopup(L.popup({ maxWidth: 250, minWidth: 100, autoClose: false, closeOnClick: false, className: `running - popup` })).setPopupContent('You are here !').openPopup().on('click', () => map.setView(coords));
         this.#map.on('click', this._showForm.bind(this));
+        this.#workouts.forEach(work => {
+            this._renderWorkoutMarker(work);
+        });
+
+        //Attach close btn
+        document.querySelectorAll('.workout__close').forEach(btn => btn.addEventListener('click', function (e) {
+            thisK._deleteWorkout(e);
+            thisK._setLocalStorage();
+        }));
+
+        //Hide form when click outside form
+        containerWorkouts.addEventListener('click', function (e) {
+            if (form.classList.contains('hidden')) {
+            } else {
+                if (e.target.className.includes('form')) {
+                } else {
+                    thisK._hideForm();
+                }
+            }
+        });
     }
     _showForm(mapE) {
         //Handling clicks on map
@@ -127,6 +158,7 @@ class App {
         const distance = +inputDistance.value;
         const duration = +inputDuration.value;
         const { lat, lng } = this.#mapEvent.latlng;
+        const thisK = this;
         let workout;
 
         //If acctivity running, create running object
@@ -145,14 +177,19 @@ class App {
             workout = new Cycling([lat, lng], distance, duration, elevation);
             this.#workouts.push(workout);
         }
-        //Add new object to workout array
-
         //Render workout on map as a marker
         this._renderWorkoutMarker(workout);
         //Render workout on list
         this._renderWorkout(workout);
         //Hide form + clear input fields
         this._hideForm();
+        //Attach delete event
+        document.querySelector('.workout__close').addEventListener('click', function (e) {
+            thisK._deleteWorkout(e);
+            thisK._setLocalStorage();
+        });
+        //Set local storage to all workouts
+        this._setLocalStorage();
     }
     _renderWorkoutMarker(workout) {
         const map = this.#map;
@@ -171,6 +208,7 @@ class App {
         let html = `
         <li class="workout workout--${workout.type}" data-id="${workout.id}">
           <h2 class="workout__title">${workout.description}</h2>
+          <span class="workout__close">&times;</span>
           <div class="workout__details">
             <span class="workout__icon">${workout.type === 'running' ? '🏃‍♂️' : '🚴‍♀️'}</span>
             <span class="workout__value">${workout.distance}</span>
@@ -211,6 +249,10 @@ class App {
         </li>`
         }
         form.insertAdjacentHTML('afterend', html);
+        if (document.querySelectorAll('.workout').length >= 2) {
+            btnClear.style.display = 'block';
+            btnClear.addEventListener('click', this._deleteAllWorkouts.bind(this));
+        };
     }
     _moveToPopup(e) {
         const workoutEl = e.target.closest('.workout');
@@ -222,6 +264,46 @@ class App {
                 duration: 1,
             }
         });
+    }
+    _setLocalStorage() {
+        localStorage.setItem('workouts', JSON.stringify(this.#workouts));
+    }
+    _getLocalStorage() {
+        const data = JSON.parse(localStorage.getItem('workouts'));
+        if (!data) return;
+        this.#workouts = data;
+        this.#workouts.forEach(workout => {
+            workout =
+                workout.type === 'running'
+                    ? Object.setPrototypeOf(workout, Running.prototype)
+                    : Object.setPrototypeOf(workout, Cycling.prototype);
+            this._renderWorkout(workout);
+        });
+    }
+    _deleteWorkout(e) {
+        if (window.confirm('Are you sure you want to delete this workout?')) {
+            const workoutEl = e.target.closest('.workout');
+            if (!workoutEl) return;
+            const data = JSON.parse(localStorage.getItem('workouts'));
+            if (!data) return;
+            this.#workouts = data;
+            for (let i = 0; i < this.#workouts.length; i++) {
+                if (this.#workouts[i].id === workoutEl.dataset.id) {
+                    //remove workout
+                    this.#workouts.splice(i, 1);
+                    document.querySelector(`[data-id="${workoutEl.dataset.id}"]`).remove();
+                }
+            }
+            localStorage.setItem('workouts', JSON.stringify(this.#workouts));
+        }
+    }
+    _deleteAllWorkouts() {
+        if (window.confirm('Are you sure you want to delete all workout?')) {
+            this.#workouts = [];
+            localStorage.setItem('workouts', JSON.stringify(this.#workouts));
+            btnClear.style.display = 'none';
+            document.querySelectorAll('.workout').forEach(work => work.remove());
+        }
     }
 }
 const app = new App();
