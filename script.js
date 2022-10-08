@@ -1,18 +1,5 @@
 'use strict';
 
-
-function iconColor(color) {
-    let icon = new L.Icon({
-        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-        iconSize: [20, 31],
-        iconAnchor: [12, 41],
-        popupAnchor: [1, -34],
-        shadowSize: [41, 41]
-    });
-    return icon;
-}
-
 class Workout {
     date = new Date();
     id = (Date.now() + '').slice(-10);
@@ -68,10 +55,13 @@ const inputCadence = document.querySelector('.form__input--cadence');
 const inputElevation = document.querySelector('.form__input--elevation');
 const btnClear = document.querySelector('.clear__btn');
 class App {
+    #layerGroup;
     #map;
     #mapEvent;
     #mapZoomLevel = 14;
+    #idArr = [];
     #workouts = [];
+    #markerArr = [];
     constructor() {
         //Get user's position
         this._getPosition();
@@ -95,21 +85,33 @@ class App {
             });
         }
     }
+    _iconColor(color) {
+        let icon = new L.Icon({
+            iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [20, 31],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+        return icon;
+    }
     _loadMap(position) {
+        const thisK = this;
         const { latitude } = position.coords;
         const { longitude } = position.coords;
         const coords = [latitude, longitude];
         this.#map = L.map('map').setView(coords, this.#mapZoomLevel);
         const map = this.#map;
-        const thisK = this;
         L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
         }).addTo(this.#map);
-
-        L.marker(coords, { icon: iconColor('red') })
+        L.marker(coords, { icon: this._iconColor('red') })
             .addTo(this.#map)
             .bindPopup(L.popup({ maxWidth: 250, minWidth: 100, autoClose: false, closeOnClick: false, className: `running - popup` })).setPopupContent('You are here !').openPopup().on('click', () => map.setView(coords));
+
+        this.#layerGroup = L.layerGroup().addTo(map);
         this.#map.on('click', this._showForm.bind(this));
         this.#workouts.forEach(work => {
             this._renderWorkoutMarker(work);
@@ -118,7 +120,6 @@ class App {
         //Attach close btn
         document.querySelectorAll('.workout__close').forEach(btn => btn.addEventListener('click', function (e) {
             thisK._deleteWorkout(e);
-            thisK._setLocalStorage();
         }));
 
         //Hide form when click outside form
@@ -134,15 +135,19 @@ class App {
     }
     _showForm(mapE) {
         //Handling clicks on map
-        this.#mapEvent = mapE;
         form.classList.remove('hidden');
+        this._clearInputFields();
         inputDistance.focus();
+        this.#mapEvent = mapE;
     }
     _hideForm() {
-        inputCadence.value = inputDistance.value = inputDuration.value = inputElevation.value = '';
+        this._clearInputFields();
         form.style.display = 'none';
         form.classList.add('hidden');
         setTimeout(() => form.style.display = 'grid', 1000);
+    }
+    _clearInputFields() {
+        inputCadence.value = inputDistance.value = inputDuration.value = inputElevation.value = '';
     }
     _toggleElevationField() {
         inputElevation.closest('.form__row').classList.toggle('form__row--hidden');
@@ -178,7 +183,9 @@ class App {
             this.#workouts.push(workout);
         }
         //Render workout on map as a marker
-        this._renderWorkoutMarker(workout);
+        let marker = this._renderWorkoutMarker(workout);
+        this.#markerArr.push({ id: workout.id, work: marker });
+        this.#idArr.push(marker._leaflet_id);
         //Render workout on list
         this._renderWorkout(workout);
         //Hide form + clear input fields
@@ -186,15 +193,27 @@ class App {
         //Attach delete event
         document.querySelector('.workout__close').addEventListener('click', function (e) {
             thisK._deleteWorkout(e);
-            thisK._setLocalStorage();
         });
+
         //Set local storage to all workouts
         this._setLocalStorage();
     }
+    _getCircularReplacer() {
+        const obj = new WeakSet();
+        return (_, value) => {
+            if (typeof value === 'object' && value !== null) {
+                if (obj.has(value)) {
+                    return;
+                }
+                obj.add(value);
+            }
+            return value;
+        };
+    }
     _renderWorkoutMarker(workout) {
         const map = this.#map;
-        L.marker(workout.coords, { icon: iconColor('blue') })
-            .addTo(this.#map)
+        const mark = L.marker(workout.coords, { icon: this._iconColor('blue') })
+            .addTo(this.#layerGroup)
             .bindPopup(L.popup({ maxWidth: 250, minWidth: 100, autoClose: false, closeOnClick: false, className: `${workout.type}-popup` })).setPopupContent(`${workout.type === 'running' ? '🏃‍♂️' : '🚴‍♀️'}${workout.description}`)
             .openPopup().on('click', function () {
                 const selectedElID = workout.id;
@@ -203,6 +222,7 @@ class App {
                 setTimeout(() => workoutListEl.style.backgroundColor = '#42484d', 1200);
                 map.setView(workout.coords);
             });
+        return mark;
     }
     _renderWorkout(workout) {
         let html = `
@@ -252,7 +272,7 @@ class App {
         if (document.querySelectorAll('.workout').length >= 2) {
             btnClear.style.display = 'block';
             btnClear.addEventListener('click', this._deleteAllWorkouts.bind(this));
-        };
+        }
     }
     _moveToPopup(e) {
         const workoutEl = e.target.closest('.workout');
@@ -267,6 +287,7 @@ class App {
     }
     _setLocalStorage() {
         localStorage.setItem('workouts', JSON.stringify(this.#workouts));
+        localStorage.setItem('markers', JSON.stringify(this.#markerArr, this._getCircularReplacer()));
     }
     _getLocalStorage() {
         const data = JSON.parse(localStorage.getItem('workouts'));
@@ -279,31 +300,60 @@ class App {
                     : Object.setPrototypeOf(workout, Cycling.prototype);
             this._renderWorkout(workout);
         });
+        const markerData = JSON.parse(localStorage.getItem('markers'));
+        if (!markerData) return;
+        this.#markerArr = markerData;
+        return this.#markerArr;
+    }
+    _removeWorkout(workoutEl) {
+        if (workoutEl)
+            document.querySelectorAll(`[data-id="${workoutEl.dataset.id}"]`).forEach(work => work.remove());
+        else document.querySelectorAll('.workout').forEach(work => work.remove());
     }
     _deleteWorkout(e) {
         if (window.confirm('Are you sure you want to delete this workout?')) {
             const workoutEl = e.target.closest('.workout');
             if (!workoutEl) return;
-            const data = JSON.parse(localStorage.getItem('workouts'));
-            if (!data) return;
-            this.#workouts = data;
+            this._getLocalStorage();
             for (let i = 0; i < this.#workouts.length; i++) {
+                // //remove workout marker
                 if (this.#workouts[i].id === workoutEl.dataset.id) {
                     //remove workout
+                    this._removeWorkout(workoutEl);
                     this.#workouts.splice(i, 1);
-                    document.querySelector(`[data-id="${workoutEl.dataset.id}"]`).remove();
+                    try {
+                        this.#layerGroup.removeLayer(`${this.#markerArr[i].work._leaflet_id}`);
+                    } catch (e) {
+                        alert('This feature is still error, really so sorry :<');
+                    }
+                    this.#markerArr.splice(i, 1);
+                    this._setLocalStorage();
+                    break;
                 }
             }
-            localStorage.setItem('workouts', JSON.stringify(this.#workouts));
         }
+        if (document.querySelectorAll('.workout').length < 2)
+            btnClear.style.display = 'none';
     }
     _deleteAllWorkouts() {
         if (window.confirm('Are you sure you want to delete all workout?')) {
-            this.#workouts = [];
-            localStorage.setItem('workouts', JSON.stringify(this.#workouts));
             btnClear.style.display = 'none';
-            document.querySelectorAll('.workout').forEach(work => work.remove());
+            this._getLocalStorage();
+            this._removeWorkout();
+            for (let i = 0; i < this.#markerArr.length; i++) {
+                try {
+                    this.#layerGroup.removeLayer(`${this.#idArr[i]}`);
+                } catch (e) {
+                    alert('This feature is still error, really so sorry :<');
+                }
+            }
+            this.#workouts = [];
+            this.#idArr = [];
+            this.#markerArr = [];
+            this._setLocalStorage();
         }
+        if (document.querySelectorAll('.workout').length < 2)
+            btnClear.style.display = 'none';
     }
 }
 const app = new App();
